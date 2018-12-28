@@ -135,5 +135,5 @@ Function Get-TxidsForBlock
 $apiKey = "<insert your api key here - get from bitdb website>"
 $txids = (Get-TxidsForBlock -height 562776 -apikey $apiKey).txid
 [array]::Reverse($txids) # we need to reverse the tx order from bitdb
-$txids.Count
+$txids.Count # how many tx's are in the block
 Get-MerkleRoot $txids 
