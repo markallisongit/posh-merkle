@@ -20,7 +20,7 @@ To make testing easier, this function gets a list of transactions for a block he
 
 ## Example
 ```PowerShell
-$apiKey = "qz9sy33xjt2zgjtsn3klcgy7rzpv0kwlvc2fl3akm8"
+$apiKey = "<insert your api key here - get from bitdb website>"
 $txids = (Get-TxidsForBlock -height 562776 -apikey $apiKey).txid
 [array]::Reverse($txids) # we need to reverse the tx order from bitdb
 $txids.Count # how many tx's are in the block
