@@ -1,40 +1,58 @@
-Function Get-StringHash
-{
-<#
-.SYNOPSIS 
-Gets a hash of a string, default of SHA256
-
-.DESCRIPTION
-Returns a hash of an input string as a string
-
-.PARAMETER String
-The string you would like to hash
-
-.PARAMETER HashName
-The hash algorithm to use, defaults to SHA256
-
-.EXAMPLE   
-Get-StringHash "Fox"
-
-returns
-
-f55bd2cdfae7972827638f3691a5bc189199d7cff7188d5ead489afdea0e5403
-#>    
-    param (
-        [String] $String, 
-        [String] $HashName = "SHA256"
+function Get-HashcodeFromHexString {
+    # Returns a SHA256 Hash from a Hex String input
+	[CmdletBinding()]
+    Param (
+        [Parameter(Mandatory=$true)][string] $HexString
     )
-    $StringBuilder = New-Object System.Text.StringBuilder
-    [System.Security.Cryptography.HashAlgorithm]::Create($HashName).ComputeHash([System.Text.Encoding]::UTF8.GetBytes($String)) | foreach {
-        [Void]$StringBuilder.Append($_.ToString("x2"))
+    $Bytes = [byte[]]::new($HexString.Length / 2)
+
+    For($i=0; $i -lt $HexString.Length; $i+=2){
+        $Bytes[$i/2] = [convert]::ToByte($HexString.Substring($i, 2), 16)
+    }    
+    $Bytes = [System.Security.Cryptography.HashAlgorithm]::Create("SHA256").ComputeHash( $Bytes )   
+    -join ([byte[]]$Bytes |  foreach {$_.ToString("x2") } )
+}
+
+function Reverse-HexString {
+    # reverses a Hex String and outputs either a byte array or hex string
+	[CmdletBinding()]
+    Param (
+        [Parameter(Mandatory=$true)][string] $HexString,
+        [switch] $AsString
+    )
+    $Bytes = [byte[]]::new($HexString.Length / 2)
+
+    For($i=0; $i -lt $HexString.Length; $i+=2){
+        $Bytes[$i/2] = [convert]::ToByte($HexString.Substring($i, 2), 16)
     }
-    $StringBuilder.ToString()
+    [array]::Reverse($Bytes)
+    if($AsString) {
+        -join ([byte[]]$Bytes |  foreach {$_.ToString("x2") } )
+    } else {
+        $Bytes
+    }
+}
+
+Function Get-HashOfTwo
+{
+    # reverses two input hashes, 
+    # concatenates them,
+    # then hashes them twice
+    # then reverses the byte order before returning as hex string
+    [cmdletbinding()]
+    param (
+        [string]$leftHash,
+        [string]$rightHash
+    )
+    $left = Reverse-HexString ($leftHash) -AsString
+    $right = Reverse-HexString ($rightHash) -AsString
+    return Get-HashcodeFromHexString (Get-HashcodeFromHexString ($left + $right)) -Reverse
 }
 
 Function Get-MerkleRoot {
 <#
 .SYNOPSIS 
-Gets the Merkle Root of a list of hashes
+Gets the Merkle Root of a list of hashes - order is very important.
 
 .DESCRIPTION
 Returns the root hash of a binary hash tree starting with a list of leaf hashes
@@ -42,10 +60,13 @@ Returns the root hash of a binary hash tree starting with a list of leaf hashes
 .PARAMETER hashList
 An array of hashes as strings as the leaf hashes
 
+.NOTES
+reference https://gist.github.com/shirriff/c9fb5d98e6da79d9a772#file-merkle-py
+
 .EXAMPLE   
 Get-MerkleRoot $txids
 #> 
-    # adapted from https://gist.github.com/shirriff/c9fb5d98e6da79d9a772#file-merkle-py
+
     [cmdletbinding()]
     param (
         [string[]]$hashList # an array of hashes (txids)
@@ -62,32 +83,30 @@ Get-MerkleRoot $txids
 
     # for each pair of hashes, add them together and append the result to a new array
     for ($i = 0; $i -lt ($hashList.Length - 1); $i = $i + 2)  {
-        $hashThis = $hashList[$i] + $hashList[$i+1]
-        Write-Verbose "Hashing this: $hashThis"
-        $newHash = Get-StringHash($hashThis)
+        # now double hash the two together and reverse the byte order of the second hash
+        $newHash = Get-HashOfTwo $hashList[$i] $hashList[$i+1]
         $newHashList.Add($newHash)
     }
 
     # we have an odd number of hashes, let's hash the last item twice.
-    if ($hashList.Length % 2 -eq 1) {     
+    if (($hashList.Length % 2) -eq 1) {     
         Write-Verbose "Odd number hashes, hashing this one twice: $($hashList[$hashList.Length-1])"
-        $oddHash = Get-StringHash($hashList[$hashList.Length-1])        
-        $newHashList.Add($oddHash)
+        $oddHash = $hashList[$hashList.Length-1] 
+        $newHash = Get-HashOfTwo $oddHash $oddHash
+        $newHashList.Add($newHash)
     }
 
     # now run the function again for the next level
     Get-MerkleRoot ($newHashList)
 }
 
-
-
 Function Get-TxidsForBlock 
 {
+    # gets a list of txids from a block
     [cmdletbinding()]
     param (
         [int]$height,
-        [string]$chain="BSV",
-        [string]$apiKey = "qzwng80rjs8juu0kukq9zwmx4q7gc83gxyvu9da92p"
+        [string]$apiKey
     )
 
     # get all txids for block height $height
@@ -109,11 +128,12 @@ Function Get-TxidsForBlock
     $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
     $headers.Add("key", $apiKey)
     $response = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers
-    $response.c
-
-    # ewogICAgInYiOiAzLAogICAgInEiOiB7CiAgICAgICAgImZpbmQiOiB7ICJibGsuaSI6IDU2MjY5NiB9LAogICAgICAgICJsaW1pdCI6IDEwMAogICAgfSwKICAgICJyIjogewogICAgICAgICJmIjogIlsgLltdIHwge3R4aWQ6IC50eC5ofV0iCiAgICB9Cn0
+    return $response.c
 }
 
-$txids = Get-TxidsForBlock -height 525471 -Verbose
 
-Get-MerkleRoot $txids.txid -Verbose
+$apiKey = "<insert your api key here - get from bitdb website>"
+$txids = (Get-TxidsForBlock -height 562776 -apikey $apiKey).txid
+[array]::Reverse($txids) # we need to reverse the tx order from bitdb
+$txids.Count
+Get-MerkleRoot $txids 
