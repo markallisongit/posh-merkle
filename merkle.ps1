@@ -115,7 +115,7 @@ Function Get-TxidsForBlock
     "v": 3,
     "q": {
         "find": { "blk.i": $height },
-        "limit": 100
+        "limit": 100000
     },
     "r": {
         "f": "[ .[] | {txid: .tx.h}]"
